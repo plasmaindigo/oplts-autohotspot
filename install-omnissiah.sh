@@ -1,5 +1,6 @@
 #!/bin/bash
 
+# Version 0.0.2
 # Ensure the script is run as root
 if [ "$EUID" -ne 0 ]; then
   echo "Please run as root (use sudo ./install-omnissiah.sh)"
@@ -11,11 +12,18 @@ echo "   Initiating the Omnissiah Network Protocol...   "
 echo "=================================================="
 echo ""
 
-# Gather user variables
+# Gather user variables for Client Mode
 read -p "Enter your primary Wi-Fi SSID: " WIFI_SSID
 read -p "Enter your Wi-Fi Password: " WIFI_PASS
 read -p "Enter your Wi-Fi Country Code [Default: TR]: " COUNTRY_CODE
 COUNTRY_CODE=${COUNTRY_CODE:-TR}
+
+echo ""
+# Gather user variables for Hotspot Mode
+read -p "Enter your hotspot name [Default: Omnissiah]: " HOTSPOT_SSID
+HOTSPOT_SSID=${HOTSPOT_SSID:-Omnissiah}
+read -p "Enter your hotspot password (min 8 chars) [Default: orangepi]: " HOTSPOT_PASS
+HOTSPOT_PASS=${HOTSPOT_PASS:-orangepi}
 
 echo ""
 echo "Appeasing the machine spirits (updating and installing packages)..."
@@ -26,24 +34,23 @@ echo "Disabling default startup for hostapd and dnsmasq..."
 systemctl disable hostapd dnsmasq
 systemctl stop hostapd dnsmasq
 
-echo "Configuring hostapd (Hotspot)..."
+echo "Configuring hostapd (Hotspot with AES/CCMP)..."
 cat << EOF > /etc/hostapd/hostapd.conf
 interface=wlan0
-ssid=Omnissiah
+ssid=$HOTSPOT_SSID
 hw_mode=g
 channel=6
 macaddr_acl=0
 auth_algs=1
 ignore_broadcast_ssid=0
 wpa=2
-wpa_passphrase=orangepi
+wpa_passphrase=$HOTSPOT_PASS
 wpa_key_mgmt=WPA-PSK
-wpa_pairwise=TKIP
+wpa_pairwise=CCMP
 rsn_pairwise=CCMP
 EOF
 
 sed -i 's|^#DAEMON_CONF=""|DAEMON_CONF="/etc/hostapd/hostapd.conf"|g' /etc/default/hostapd
-# Catch the case where it might just be DAEMON_CONF= (without #)
 sed -i 's|^DAEMON_CONF=.*|DAEMON_CONF="/etc/hostapd/hostapd.conf"|g' /etc/default/hostapd
 
 echo "Configuring dnsmasq (DHCP)..."
@@ -69,7 +76,6 @@ network={
 EOF
 
 echo "Forging the logic script at /usr/local/bin/auto-wifi.sh..."
-# Note: Using 'EOF' with quotes prevents variable expansion during file creation!
 cat << 'EOF' > /usr/local/bin/auto-wifi.sh
 #!/bin/bash
 
@@ -96,18 +102,18 @@ if [ "$MATCH_FOUND" = true ]; then
     echo "Known network found. Connecting as client..."
     systemctl stop hostapd
     systemctl stop dnsmasq
-
+    
     ip addr flush dev $INTERFACE
     wpa_supplicant -B -i $INTERFACE -c $WPA_CONF
     dhclient $INTERFACE
 else
-    echo "No known networks found. Starting Omnissiah hotspot..."
-
+    echo "No known networks found. Starting hotspot..."
+    
     killall wpa_supplicant 2>/dev/null
-
+    
     ip addr flush dev $INTERFACE
     ip addr add 10.0.0.1/24 dev $INTERFACE
-
+    
     systemctl start dnsmasq
     systemctl start hostapd
 fi
