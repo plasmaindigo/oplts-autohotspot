@@ -1,7 +1,7 @@
 #!/bin/bash
 
 
-# Debugger Version 0.0.1
+# Debugger Version 0.0.2
 # Ensure the script is run as root
 if [ "$EUID" -ne 0 ]; then
   echo "Please run as root (use sudo ./debug-omnissiah.sh)"
@@ -12,44 +12,75 @@ fi
 GREEN='\033[0;32m'
 RED='\033[0;31m'
 YELLOW='\033[1;33m'
+CYAN='\033[0;36m'
 NC='\033[0m' # No Color
 
-echo -e "${YELLOW}==================================================${NC}"
-echo -e "${YELLOW}   Omnissiah Network Diagnostic Tool              ${NC}"
-echo -e "${YELLOW}==================================================${NC}"
+# Log file setup
+LOG_FILE="/var/log/omnissiah-problems.log"
+PROBLEMS_FOUND=0
+
+# Initialize the log file
+echo "Omnissiah Diagnostic Report - $(date)" > "$LOG_FILE"
+echo "==================================================" >> "$LOG_FILE"
+
+# Logging Functions
+log_success() {
+    echo -e "${GREEN}[OK] $1${NC}"
+}
+
+log_error() {
+    echo -e "${RED}[FAIL] $1${NC}"
+    echo "[FAIL] $1" >> "$LOG_FILE"
+    ((PROBLEMS_FOUND++))
+}
+
+log_warning() {
+    echo -e "${YELLOW}[WARNING] $1${NC}"
+    echo "[WARNING] $1" >> "$LOG_FILE"
+    ((PROBLEMS_FOUND++))
+}
+
+log_info() {
+    echo -e "      $1"
+}
+
+
+echo -e "${CYAN}==================================================${NC}"
+echo -e "${CYAN}   Omnissiah Network Diagnostic Tool              ${NC}"
+echo -e "${CYAN}==================================================${NC}"
 echo ""
 
 # 1. Check Network Interface
-echo -e "${YELLOW}[1/5] Checking Wireless Interface...${NC}"
+echo -e "${CYAN}[1/5] Checking Wireless Interface...${NC}"
 if ip link show wlan0 > /dev/null 2>&1; then
-    echo -e "${GREEN}[OK] Interface wlan0 exists.${NC}"
+    log_success "Interface wlan0 exists."
     MAC_ADDR=$(cat /sys/class/net/wlan0/address)
-    echo "      MAC Address: $MAC_ADDR"
+    log_info "MAC Address: $MAC_ADDR"
 else
-    echo -e "${RED}[FAIL] Interface wlan0 not found! Check hardware or drivers.${NC}"
+    log_error "Interface wlan0 not found! Check hardware or drivers."
 fi
 echo ""
 
 # 2. Check Required Packages
-echo -e "${YELLOW}[2/5] Checking Required Packages...${NC}"
+echo -e "${CYAN}[2/5] Checking Required Packages...${NC}"
 PACKAGES=("hostapd" "dnsmasq" "iw" "wpasupplicant" "isc-dhcp-client")
 for pkg in "${PACKAGES[@]}"; do
     if dpkg -l | grep -qw "$pkg"; then
-        echo -e "${GREEN}[OK] $pkg is installed.${NC}"
+        log_success "$pkg is installed."
     else
-        echo -e "${RED}[FAIL] $pkg is missing! Run: apt install $pkg${NC}"
+        log_error "$pkg is missing! Run: apt install $pkg"
     fi
 done
 echo ""
 
 # 3. Check Configuration Files
-echo -e "${YELLOW}[3/5] Checking Configuration Files...${NC}"
+echo -e "${CYAN}[3/5] Checking Configuration Files...${NC}"
 
 check_file() {
     if [ -f "$1" ]; then
-        echo -e "${GREEN}[OK] File exists: $1${NC}"
+        log_success "File exists: $1"
     else
-        echo -e "${RED}[FAIL] File missing: $1${NC}"
+        log_error "File missing: $1"
     fi
 }
 
@@ -60,66 +91,75 @@ check_file "/usr/local/bin/auto-wifi.sh"
 
 # Check if script is executable
 if [ -x "/usr/local/bin/auto-wifi.sh" ]; then
-    echo -e "${GREEN}[OK] Script /usr/local/bin/auto-wifi.sh is executable.${NC}"
+    log_success "Script /usr/local/bin/auto-wifi.sh is executable."
 else
-    echo -e "${RED}[FAIL] Script /usr/local/bin/auto-wifi.sh is NOT executable! Run: chmod +x /usr/local/bin/auto-wifi.sh${NC}"
+    log_error "Script /usr/local/bin/auto-wifi.sh is NOT executable! Run: chmod +x /usr/local/bin/auto-wifi.sh"
 fi
 
 # Check hostapd default config linkage
 if grep -q '^DAEMON_CONF="/etc/hostapd/hostapd.conf"' /etc/default/hostapd; then
-    echo -e "${GREEN}[OK] hostapd DAEMON_CONF is correctly linked.${NC}"
+    log_success "hostapd DAEMON_CONF is correctly linked."
 else
-    echo -e "${RED}[FAIL] hostapd DAEMON_CONF missing in /etc/default/hostapd!${NC}"
+    log_error "hostapd DAEMON_CONF missing in /etc/default/hostapd!"
 fi
 echo ""
 
 # 4. Check Systemd Service
-echo -e "${YELLOW}[4/5] Checking Systemd Service...${NC}"
+echo -e "${CYAN}[4/5] Checking Systemd Service...${NC}"
 if systemctl is-enabled auto-wifi.service > /dev/null 2>&1; then
-    echo -e "${GREEN}[OK] auto-wifi.service is ENABLED on boot.${NC}"
+    log_success "auto-wifi.service is ENABLED on boot."
 else
-    echo -e "${RED}[FAIL] auto-wifi.service is DISABLED! Run: systemctl enable auto-wifi.service${NC}"
+    log_error "auto-wifi.service is DISABLED! Run: systemctl enable auto-wifi.service"
 fi
 
 SERVICE_STATE=$(systemctl is-active auto-wifi.service)
 if [ "$SERVICE_STATE" = "active" ]; then
-    echo -e "${GREEN}[OK] Service ran successfully (State: active/exited).${NC}"
+    log_success "Service ran successfully (State: active/exited)."
 else
-    echo -e "${RED}[WARNING] Service state is: $SERVICE_STATE. Check 'journalctl -u auto-wifi.service' for logs.${NC}"
+    log_warning "Service state is: $SERVICE_STATE. Check 'journalctl -u auto-wifi.service' for logs."
 fi
 echo ""
 
 # 5. Check Current Active State
-echo -e "${YELLOW}[5/5] Determining Current Network State...${NC}"
+echo -e "${CYAN}[5/5] Determining Current Network State...${NC}"
 
 WLAN_IP=$(ip -4 addr show wlan0 2>/dev/null | grep -oP '(?<=inet\s)\d+(\.\d+){3}')
 
 if pgrep -x "hostapd" > /dev/null; then
     echo -e "${GREEN}State: HOTSPOT MODE (Omnissiah Active)${NC}"
-    echo "      hostapd is running."
+    log_info "hostapd is running."
     if pgrep -x "dnsmasq" > /dev/null; then
-         echo "      dnsmasq is running."
+         log_info "dnsmasq is running."
     else
-         echo -e "${RED}      WARNING: dnsmasq is NOT running. Clients won't get an IP!${NC}"
+         log_error "dnsmasq is NOT running. Clients won't get an IP!"
     fi
-    echo "      Current IP: ${WLAN_IP:-None (Should be 10.0.0.1)}"
+    log_info "Current IP: ${WLAN_IP:-None (Should be 10.0.0.1)}"
 elif pgrep -x "wpa_supplicant" > /dev/null; then
     echo -e "${GREEN}State: CLIENT MODE (Connected to known Wi-Fi)${NC}"
-    echo "      wpa_supplicant is running."
-    echo "      Current IP: ${WLAN_IP:-Waiting for DHCP...}"
+    log_info "wpa_supplicant is running."
+    log_info "Current IP: ${WLAN_IP:-Waiting for DHCP...}"
     
     # Try to get the SSID it's connected to
     CONNECTED_SSID=$(iw dev wlan0 link | grep "SSID:" | sed 's/^[ \t]*SSID: //')
     if [ ! -z "$CONNECTED_SSID" ]; then
-        echo "      Connected Network: $CONNECTED_SSID"
+        log_info "Connected Network: $CONNECTED_SSID"
     fi
 else
     echo -e "${RED}State: UNKNOWN / DISCONNECTED${NC}"
-    echo "      Neither hostapd nor wpa_supplicant are running."
-    echo "      Try running the script manually: sudo /usr/local/bin/auto-wifi.sh${NC}"
+    log_error "Neither hostapd nor wpa_supplicant are running."
+    log_info "Try running the script manually: sudo /usr/local/bin/auto-wifi.sh"
 fi
 
 echo ""
-echo -e "${YELLOW}==================================================${NC}"
-echo -e "${YELLOW}   Diagnostics Complete                           ${NC}"
-echo -e "${YELLOW}==================================================${NC}"
+echo -e "${CYAN}==================================================${NC}"
+
+# Final Report Summary
+if [ "$PROBLEMS_FOUND" -gt 0 ]; then
+    echo -e "${RED}Diagnostics Complete. $PROBLEMS_FOUND problem(s) found!${NC}"
+    echo -e "${YELLOW}A detailed ledger of failures has been written to: $LOG_FILE${NC}"
+else
+    echo -e "${GREEN}Diagnostics Complete. All systems nominal.${NC}"
+    echo "Status: Perfect Harmony" >> "$LOG_FILE"
+    echo -e "A clean bill of health has been recorded in $LOG_FILE"
+fi
+echo -e "${CYAN}==================================================${NC}"
